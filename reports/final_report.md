@@ -1,51 +1,51 @@
-# Reliability Agent Final Report
+# Báo cáo cuối kỳ Reliability Agent
 
-## 1. Architecture Summary
+## 1. Tổng quan kiến trúc
 
-The gateway checks the cache before calling providers. Cache misses are sent through a circuit breaker for the primary provider, then a circuit breaker for the backup provider. If both paths are unavailable, the gateway returns a static degraded response.
+Gateway kiểm tra cache trước khi gọi provider. Nếu cache không có kết quả, request đi qua circuit breaker của primary provider, sau đó đến backup provider. Nếu cả hai đều không dùng được, gateway trả về thông báo hệ thống đang suy giảm.
 
 ```text
 User Request
     |
     v
-[Reliability Gateway] --> [Memory Cache] --> hit: return cached response
+[Reliability Gateway] --> [Memory Cache] --> hit: trả về response đã lưu
     |
     v miss
 [Circuit Breaker: primary] --> primary provider
     |
-    v failure or open circuit
+    v provider lỗi hoặc circuit open
 [Circuit Breaker: backup] --> backup provider
     |
-    v failure or open circuit
+    v provider lỗi hoặc circuit open
 [Static fallback response]
 ```
 
-## 2. Configuration
+## 2. Cấu hình
 
-| Setting | Value | Reason |
+| Tham số | Giá trị | Lý do |
 |---|---:|---|
-| failure_threshold | 3 | Opens a circuit after three consecutive failures to avoid repeatedly calling an unhealthy provider. |
-| reset_timeout_seconds | 2 | Allows a short cooldown before a half-open probe tests recovery. |
-| success_threshold | 1 | A successful half-open probe restores traffic quickly in this simulated workload. |
-| cache TTL | 300 seconds | Reuses stable responses for five minutes while limiting staleness. |
-| similarity_threshold | 0.92 | Conservative threshold reduces semantic false hits; differing four-digit values are also blocked. |
-| load_test requests | 100 per scenario | Three scenarios produce 300 requests total. |
+| failure_threshold | 3 | Mở circuit sau ba lỗi liên tiếp, tránh gọi lặp lại provider đang không khỏe. |
+| reset_timeout_seconds | 2 | Chờ một khoảng cooldown ngắn trước khi half-open probe kiểm tra provider phục hồi. |
+| success_threshold | 1 | Một probe thành công đủ để khôi phục traffic nhanh trong workload mô phỏng. |
+| cache TTL | 300 giây | Tái sử dụng response ổn định trong năm phút và hạn chế dữ liệu cũ. |
+| similarity_threshold | 0.92 | Ngưỡng bảo thủ giảm false hit; query có số bốn chữ số khác nhau cũng bị chặn. |
+| load_test requests | 100 mỗi scenario | Ba scenario tạo ra tổng cộng 300 request. |
 
-## 3. SLO Definitions
+## 3. Định nghĩa SLO
 
-| SLI | SLO target | Actual value | Met? |
+| SLI | Mục tiêu SLO | Giá trị thực tế | Đạt? |
 |---|---|---:|---|
-| Availability | >= 99% | 99.00% | Yes |
-| Latency P95 | < 2500 ms | 314.28 ms | Yes |
-| Fallback success rate | >= 95% | 96.05% | Yes |
-| Cache hit rate | >= 10% | 62.33% | Yes |
-| Recovery time | < 5000 ms | 2256.48 ms | Yes |
+| Availability | >= 99% | 99.00% | Có |
+| Latency P95 | < 2500 ms | 314.28 ms | Có |
+| Fallback success rate | >= 95% | 96.05% | Có |
+| Cache hit rate | >= 10% | 62.33% | Có |
+| Recovery time | < 5000 ms | 2256.48 ms | Có |
 
 ## 4. Metrics
 
-Metrics below are from the cache-enabled run in `reports/metrics.json`.
+Số liệu dưới đây được sinh từ lần chạy cache-enabled trong `reports/metrics.json`.
 
-| Metric | Value |
+| Metric | Giá trị |
 |---|---:|
 | total_requests | 300 |
 | availability | 99.00% |
@@ -60,11 +60,11 @@ Metrics below are from the cache-enabled run in `reports/metrics.json`.
 | circuit_open_count | 9 |
 | recovery_time_ms | 2256.48 |
 
-## 5. Cache Comparison
+## 5. So sánh cache
 
-Both runs use 300 requests and the same provider and chaos settings: one with `cache.enabled: true`, one with `cache.enabled: false`. Cache-hit responses have zero gateway latency, but the current latency percentile list intentionally records provider calls only, so the P50/P95 columns measure miss-path latency rather than end-to-end latency.
+Hai lần chạy dùng cùng ba chaos scenario và 100 request mỗi scenario: một lần với `cache.enabled: true`, một lần với `cache.enabled: false`. Cache hit trả kết quả ngay tại gateway, nhưng danh sách percentile hiện chỉ ghi latency của provider call. Vì vậy P50/P95 thể hiện miss-path latency, chưa phải end-to-end latency.
 
-| Metric | Without cache | With cache | Delta (with - without) |
+| Metric | Không cache | Có cache | Chênh lệch (có - không) |
 |---|---:|---:|---:|
 | latency_p50_ms | 276.76 | 277.03 | +0.27 ms |
 | latency_p95_ms | 315.55 | 314.28 | -1.27 ms |
@@ -72,30 +72,30 @@ Both runs use 300 requests and the same provider and chaos settings: one with `c
 | cache_hit_rate | 0.00% | 62.33% | +62.33 pp |
 | circuit_open_count | 23 | 9 | -14 |
 
-The cache reduced estimated provider cost by about 62.3% and reduced circuit openings. End-to-end cache latency should be recorded separately in a production metrics implementation.
+Cache giảm estimated provider cost khoảng 62.3% và giảm số lần circuit open. Trong production nên ghi riêng end-to-end latency cho cache hit.
 
-## 6. Redis Shared Cache
+## 6. Redis shared cache
 
-In-memory cache is isolated to one gateway process, so instances behind a load balancer cannot reuse each other's cached responses. `SharedRedisCache` stores query hashes, queries, and responses in Redis with a TTL, allowing instances with the same prefix to share state while retaining the privacy and false-hit checks.
+In-memory cache bị tách riêng theo từng gateway process, vì vậy các instance sau load balancer không dùng lại được cache của nhau. `SharedRedisCache` lưu query hash, query và response trong Redis kèm TTL; các instance dùng cùng prefix có thể thấy cùng một state. Các query nhạy cảm và false hit do số bốn chữ số khác nhau vẫn bị chặn.
 
-Redis was not available on the local machine because Docker is not installed. Therefore Redis shared-state evidence and Redis CLI `KEYS` output were not collected locally. The Redis implementation is present in `src/reliability_lab/cache.py`; it should be verified with `pytest tests/test_redis_cache.py -v` in an environment where Redis is running.
+Docker không có sẵn trên máy local nên chưa thu thập được bằng chứng shared-state và Redis CLI output. Cần xác minh trên môi trường có Docker bằng lệnh `docker compose up -d` và `pytest tests/test_redis_cache.py -v`.
 
-## 7. Chaos Scenarios
+## 7. Chaos scenarios
 
-| Scenario | Expected behavior | Observed behavior | Pass/Fail |
+| Scenario | Hành vi kỳ vọng | Hành vi quan sát | Pass/Fail |
 |---|---|---|---|
-| primary_timeout_100 | Primary fails; backup handles traffic and the primary circuit opens. | Scenario reported pass in the reproducible run. | Pass |
-| primary_flaky_50 | Mixture of primary failures and backup routing; circuit may open and recover. | Scenario reported pass in the reproducible run. | Pass |
-| all_healthy | Requests use healthy providers with no sustained outage. | Scenario reported pass in the reproducible run. | Pass |
+| primary_timeout_100 | Primary fail, backup xử lý traffic và primary circuit open. | Scenario pass trong lần chạy có thể tái lập. | Pass |
+| primary_flaky_50 | Có cả primary failure và backup routing; circuit có thể open và recover. | Scenario pass trong lần chạy có thể tái lập. | Pass |
+| all_healthy | Provider khỏe xử lý traffic, không có outage kéo dài. | Scenario pass trong lần chạy có thể tái lập. | Pass |
 
-The combined cache-enabled run recorded 9 circuit openings and an average recovery time of 2256.48 ms.
+Lần chạy cache-enabled ghi nhận 9 lần circuit open và recovery time trung bình 2256.48 ms.
 
-## 8. Failure Analysis
+## 8. Phân tích failure
 
-The current fault-injection run met the stated SLOs, but a remaining weakness is that each process has its own circuit state and the fallback provider can also fail. Before production, share circuit health signals or use centralized observability, add bounded retries with backoff, and alert when fallback success falls below its SLO.
+Lần fault-injection hiện tại đạt các SLO đã đặt ra, nhưng vẫn còn điểm yếu: circuit state nằm trong từng process và fallback provider vẫn có thể fail. Trước khi production, cần chia sẻ health signal của circuit hoặc dùng centralized observability, thêm retry có giới hạn kèm backoff, và cảnh báo khi fallback success thấp hơn SLO.
 
-## 9. Next Steps
+## 9. Bước tiếp theo
 
-1. Run Redis integration tests in a Docker-enabled environment and include shared-state evidence.
-2. Record end-to-end latency for both cache hits and provider calls, then define an end-to-end latency SLO.
-3. Add scenario-level metrics and stricter pass criteria for availability and fallback success.
+1. Chạy và lưu bằng chứng Redis integration test trên môi trường có Docker.
+2. Ghi end-to-end latency riêng cho cache hit và provider call.
+3. Thêm scenario-level metrics và SLO gate chặt chẽ hơn cho availability và fallback success.
